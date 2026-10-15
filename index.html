@@ -23,14 +23,15 @@
     .row input { flex:1; min-width:120px; }
     .err { color:#ff5555; min-height:1.2em; }
     .dim { opacity:.6; font-size:.85rem; }
-    nav { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+    nav { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; align-items:center; }
     nav .spacer { flex:1; }
     textarea { width:100%; resize:vertical; }
     img.pic { max-width:100%; margin-top:8px; border:1px solid #00ff41; }
     a { color:#00ff41; }
     .comments { margin-top:8px; border-top:1px dashed #00ff41; padding-top:8px; }
     .stat { font-size:2rem; }
-    .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
+    @media (max-width:560px) { .grid { grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
@@ -55,7 +56,6 @@
       <input id="rEmail" type="email" placeholder="email">
       <input id="rUser" placeholder="username (letters, numbers, _)" maxlength="20">
       <input id="rPass" type="password" placeholder="password (min 6 characters)">
-      
       <button id="btnRegister">CREATE ACCOUNT</button>
     </div>
 
@@ -72,6 +72,7 @@
     <nav>
       <button id="navFeed" class="active">FEED</button>
       <button id="navNews">NEWS</button>
+      <button id="navChat">CHAT</button>
       <span class="spacer"></span>
       <span id="me" class="dim"></span>
       <button id="btnLogout">LOGOUT</button>
@@ -92,6 +93,26 @@
     <div id="newsView" class="hidden">
       <div id="news" class="dim">loading tech news...</div>
     </div>
+
+    <div id="chatView" class="hidden">
+      <div id="chatList">
+        <div class="box col">
+          <input id="searchBox" placeholder="search a username...">
+          <div id="searchResults"></div>
+        </div>
+        <div class="box"><b>YOUR CHATS</b><div id="inbox" class="dim">no chats yet</div></div>
+      </div>
+      <div id="chatRoom" class="hidden">
+        <div class="row" style="margin-bottom:8px">
+          <button id="chatBack">&lt; BACK</button><b id="chatWith"></b>
+        </div>
+        <div id="chatMsgs" class="box" style="height:350px; overflow-y:auto;"></div>
+        <div class="row">
+          <input id="chatText" maxlength="500" placeholder="type a message..." autocomplete="off">
+          <button id="chatSend">SEND</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- GOVERNMENT APP -->
@@ -104,8 +125,10 @@
     <div class="grid">
       <div class="box">REGISTERED USERS<div class="stat" id="gUsers">0</div></div>
       <div class="box">TOTAL POSTS<div class="stat" id="gPosts">0</div></div>
+      <div class="box">TOTAL MESSAGES<div class="stat" id="gMsgs">0</div></div>
     </div>
     <div class="box"><b>ALL USERS</b><div id="gUserList" class="dim"></div></div>
+    <div class="box"><b>ALL PRIVATE MESSAGES</b><div id="gChatList"></div></div>
     <div class="box"><b>ALL POSTS (newest first)</b><div id="gPostList"></div></div>
   </div>
 </div>
@@ -114,10 +137,12 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, deleteUser }
     from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-  import { getDatabase, ref, push, set, get, remove, onValue, onChildAdded, query, limitToLast, serverTimestamp }
+  import { getDatabase, ref, push, set, get, remove, onValue, onChildAdded, query, limitToLast, limitToFirst, orderByKey, startAt, endAt, serverTimestamp }
     from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
-  // PASTE YOUR FIREBASE CONFIG HERE
+  // =====================================================
+  // 1) PASTE YOUR FIREBASE CONFIG HERE (replace this block)
+  // =====================================================
   const firebaseConfig = {
   apiKey: "AIzaSyAuLG89zf6dIshXG9CBiG0Aq-QztOI67iY",
   authDomain: "coeur-create.firebaseapp.com",
@@ -128,14 +153,18 @@
   appId: "1:485527500591:web:ec96008d4d55e9cc4553da"
   };
 
+  // =====================================================
+  // 2) PUT THE GOVERNMENT EMAIL YOU CREATED IN FIREBASE
+  // =====================================================
   const GOV_EMAIL = "irababariracoeurdamour@gmail.com";
+
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db = getDatabase(app);
   const $ = (id) => document.getElementById(id);
 
   let me = null;
-  let busy = false; // true while registering, so we don't enter too early
+  let busy = false;
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -217,18 +246,20 @@
     $("me").textContent = "@" + me.username;
     $("app").classList.remove("hidden");
     startFeed();
+    startInbox();
     loadNews();
   }
 
   // ---------- NAVIGATION ----------
-  $("navFeed").onclick = () => {
-    $("feedView").classList.remove("hidden"); $("newsView").classList.add("hidden");
-    $("navFeed").classList.add("active"); $("navNews").classList.remove("active");
-  };
-  $("navNews").onclick = () => {
-    $("newsView").classList.remove("hidden"); $("feedView").classList.add("hidden");
-    $("navNews").classList.add("active"); $("navFeed").classList.remove("active");
-  };
+  function show(view) {
+    ["feed", "news", "chat"].forEach((v) => {
+      $(v + "View").classList.toggle("hidden", v !== view);
+      $("nav" + v[0].toUpperCase() + v.slice(1)).classList.toggle("active", v === view);
+    });
+  }
+  $("navFeed").onclick = () => show("feed");
+  $("navNews").onclick = () => show("news");
+  $("navChat").onclick = () => show("chat");
 
   // ---------- IMAGE COMPRESSION ----------
   function compress(file) {
@@ -349,15 +380,124 @@
     } catch (e) { box.textContent = "could not load news, check your internet and refresh."; }
   }
 
+  // ---------- SEARCH + PRIVATE CHAT ----------
+  let chatUnsub = null;
+  let currentChat = null;
+  let searchTimer;
+
+  function chatId(a, b) { return [a, b].sort().join("_"); }
+
+  $("searchBox").oninput = () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(doSearch, 300);
+  };
+
+  async function doSearch() {
+    const term = $("searchBox").value.trim().toLowerCase();
+    const box = $("searchResults");
+    box.textContent = "";
+    if (!term) return;
+    try {
+      const snap = await get(query(ref(db, "usernames"), orderByKey(), startAt(term), endAt(term + "\uf8ff"), limitToFirst(10)));
+      let found = 0;
+      snap.forEach((child) => {
+        if (child.val() === me.uid) return;
+        found++;
+        const b = el("button", "", "@" + child.key);
+        b.style.margin = "6px 6px 0 0";
+        b.onclick = () => openChat(child.val(), child.key);
+        box.appendChild(b);
+      });
+      if (!found) box.appendChild(el("div", "dim", "no user found"));
+    } catch (e) { box.appendChild(el("div", "err", "search failed: " + cleanError(e))); }
+  }
+
+  function startInbox() {
+    onValue(ref(db, "userChats/" + me.uid), (s) => {
+      const box = $("inbox");
+      const chats = s.val() || {};
+      const list = Object.entries(chats).sort((a, b) => b[1].time - a[1].time);
+      box.textContent = "";
+      if (!list.length) { box.textContent = "no chats yet"; return; }
+      list.forEach(([uid, c]) => {
+        const b = el("button", "", "@" + c.username);
+        b.style.margin = "6px 6px 0 0";
+        b.onclick = () => openChat(uid, c.username);
+        box.appendChild(b);
+      });
+    });
+  }
+
+  function openChat(uid, name) {
+    if (chatUnsub) chatUnsub();
+    currentChat = { id: chatId(me.uid, uid), uid, name };
+    $("chatList").classList.add("hidden");
+    $("chatRoom").classList.remove("hidden");
+    $("chatWith").textContent = "@" + name;
+    const box = $("chatMsgs");
+    box.textContent = "";
+    chatUnsub = onChildAdded(query(ref(db, "chats/" + currentChat.id), limitToLast(100)), (s) => {
+      const m = s.val();
+      const line = el("div");
+      line.style.marginBottom = "6px";
+      if (m.uid === me.uid) line.style.textAlign = "right";
+      line.append(el("span", "dim", fmt(m.time) + " "), el("b", "", m.username + "> "), document.createTextNode(m.text));
+      box.appendChild(line);
+      box.scrollTop = box.scrollHeight;
+    });
+  }
+
+  $("chatBack").onclick = () => {
+    if (chatUnsub) chatUnsub();
+    chatUnsub = null;
+    currentChat = null;
+    $("chatRoom").classList.add("hidden");
+    $("chatList").classList.remove("hidden");
+  };
+
+  async function sendChat() {
+    const text = $("chatText").value.trim();
+    if (!text || !currentChat) return;
+    $("chatText").value = "";
+    try {
+      await push(ref(db, "chats/" + currentChat.id), { uid: me.uid, username: me.username, text, time: serverTimestamp() });
+      await set(ref(db, "userChats/" + me.uid + "/" + currentChat.uid), { username: currentChat.name, time: serverTimestamp() });
+      await set(ref(db, "userChats/" + currentChat.uid + "/" + me.uid), { username: me.username, time: serverTimestamp() });
+    } catch (e) { alert("could not send: " + cleanError(e)); }
+  }
+  $("chatSend").onclick = sendChat;
+  $("chatText").onkeydown = (e) => { if (e.key === "Enter") sendChat(); };
+
   // ---------- GOVERNMENT DASHBOARD ----------
+  let usersMap = {};
+  let lastChats = {};
+
+  function renderGovChats() {
+    const box = $("gChatList");
+    box.textContent = "";
+    let total = 0;
+    Object.entries(lastChats).forEach(([id, msgs]) => {
+      const names = id.split("_").map((u) => usersMap[u] ? "@" + usersMap[u].username : u.slice(0, 6));
+      const d = el("div", "box");
+      d.appendChild(el("b", "", names.join("  <->  ")));
+      Object.values(msgs).sort((a, b) => a.time - b.time).forEach((m) => {
+        total++;
+        d.appendChild(el("div", "", fmt(m.time) + "  " + m.username + "> " + m.text));
+      });
+      box.appendChild(d);
+    });
+    $("gMsgs").textContent = total;
+  }
+
   function startGov() {
     onValue(ref(db, "users"), (s) => {
-      const users = s.val() || {};
-      const list = Object.values(users);
+      usersMap = s.val() || {};
+      const list = Object.values(usersMap);
       $("gUsers").textContent = list.length;
       const box = $("gUserList");
       box.textContent = "";
       list.forEach((u) => box.appendChild(el("div", "", "@" + u.username + "  |  " + u.email + "  |  joined " + (u.createdAt ? fmt(u.createdAt) : "?"))));
+      renderGovChats();
     });
     onValue(ref(db, "posts"), (s) => {
       const posts = s.val() || {};
@@ -372,6 +512,10 @@
         if (p.image) { const im = el("img", "pic"); im.src = p.image; d.appendChild(im); }
         box.appendChild(d);
       });
+    });
+    onValue(ref(db, "chats"), (s) => {
+      lastChats = s.val() || {};
+      renderGovChats();
     });
   }
 </script>
