@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coeur-Create</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { background:#000; color:#00ff41; font-family:"Courier New",monospace; margin:0; padding:12px; }
+    .wrap { max-width:760px; margin:0 auto; }
+    h1 { margin:0 0 10px; font-size:1.5rem; border-bottom:1px solid #00ff41; padding-bottom:8px; }
+    h1::after { content:"_"; animation:blink 1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity:0; } }
+    input, textarea, button { background:#000; color:#00ff41; border:1px solid #00ff41; font-family:inherit; font-size:1rem; padding:10px; }
+    input::placeholder, textarea::placeholder { color:#00ff41; opacity:.5; }
+    input:focus, textarea:focus { outline:2px solid #00ff41; }
+    button { cursor:pointer; }
+    button:hover, button.active { background:#00ff41; color:#000; }
+    .hidden { display:none !important; }
+    .box { border:1px solid #00ff41; padding:12px; margin-bottom:12px; }
+    .col { display:flex; flex-direction:column; gap:8px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .row input { flex:1; min-width:120px; }
+    .err { color:#ff5555; min-height:1.2em; }
+    .dim { opacity:.6; font-size:.85rem; }
+    nav { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+    nav .spacer { flex:1; }
+    textarea { width:100%; resize:vertical; }
+    img.pic { max-width:100%; margin-top:8px; border:1px solid #00ff41; }
+    a { color:#00ff41; }
+    .comments { margin-top:8px; border-top:1px dashed #00ff41; padding-top:8px; }
+    .stat { font-size:2rem; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>COEUR-CREATE</h1>
+
+  <!-- AUTH SCREEN -->
+  <div id="auth">
+    <nav>
+      <button id="tabLogin" class="active">LOGIN</button>
+      <button id="tabRegister">REGISTER</button>
+      <button id="tabGov">GOVERNMENT</button>
+    </nav>
+
+    <div id="formLogin" class="box col">
+      <input id="lEmail" type="email" placeholder="email">
+      <input id="lPass" type="password" placeholder="password">
+      <button id="btnLogin">LOGIN</button>
+    </div>
+
+    <div id="formRegister" class="box col hidden">
+      <input id="rEmail" type="email" placeholder="email">
+      <input id="rUser" placeholder="username (letters, numbers, _)" maxlength="20">
+      <input id="rPass" type="password" placeholder="password (min 6 characters)">
+      
+      <button id="btnRegister">CREATE ACCOUNT</button>
+    </div>
+
+    <div id="formGov" class="box col hidden">
+      <input id="gPass" type="password" placeholder="government passkey">
+      <button id="btnGov">ENTER</button>
+    </div>
+
+    <div id="authErr" class="err"></div>
+  </div>
+
+  <!-- USER APP -->
+  <div id="app" class="hidden">
+    <nav>
+      <button id="navFeed" class="active">FEED</button>
+      <button id="navNews">NEWS</button>
+      <span class="spacer"></span>
+      <span id="me" class="dim"></span>
+      <button id="btnLogout">LOGOUT</button>
+    </nav>
+
+    <div id="feedView">
+      <div class="box col">
+        <textarea id="postText" rows="3" maxlength="1000" placeholder="share something about tech..."></textarea>
+        <div class="row">
+          <input id="postImg" type="file" accept="image/*">
+          <button id="btnPost">POST</button>
+        </div>
+        <div id="postErr" class="err"></div>
+      </div>
+      <div id="posts"></div>
+    </div>
+
+    <div id="newsView" class="hidden">
+      <div id="news" class="dim">loading tech news...</div>
+    </div>
+  </div>
+
+  <!-- GOVERNMENT APP -->
+  <div id="gov" class="hidden">
+    <nav>
+      <span>&gt; GOVERNMENT DASHBOARD</span>
+      <span class="spacer"></span>
+      <button id="btnGovLogout">LOGOUT</button>
+    </nav>
+    <div class="grid">
+      <div class="box">REGISTERED USERS<div class="stat" id="gUsers">0</div></div>
+      <div class="box">TOTAL POSTS<div class="stat" id="gPosts">0</div></div>
+    </div>
+    <div class="box"><b>ALL USERS</b><div id="gUserList" class="dim"></div></div>
+    <div class="box"><b>ALL POSTS (newest first)</b><div id="gPostList"></div></div>
+  </div>
+</div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, deleteUser }
+    from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { getDatabase, ref, push, set, get, remove, onValue, onChildAdded, query, limitToLast, serverTimestamp }
+    from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+  // PASTE YOUR FIREBASE CONFIG HERE
+  const firebaseConfig = {
+  apiKey: "AIzaSyAuLG89zf6dIshXG9CBiG0Aq-QztOI67iY",
+  authDomain: "coeur-create.firebaseapp.com",
+  databaseURL: "https://coeur-create-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "coeur-create",
+  storageBucket: "coeur-create.firebasestorage.app",
+  messagingSenderId: "485527500591",
+  appId: "1:485527500591:web:ec96008d4d55e9cc4553da"
+  };
+
+  const GOV_EMAIL = "irababariracoeurdamour@gmail.com";
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getDatabase(app);
+  const $ = (id) => document.getElementById(id);
+
+  let me = null;
+  let busy = false; // true while registering, so we don't enter too early
+
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function fmt(t) { return new Date(t).toLocaleString([], { dateStyle: "short", timeStyle: "short" }); }
+  function cleanError(e) { return (e.code || e.message || "error").replace("auth/", "").replace(/-/g, " "); }
+
+  // ---------- AUTH SCREEN TABS ----------
+  function showTab(name) {
+    ["Login", "Register", "Gov"].forEach((n) => {
+      $("form" + n).classList.toggle("hidden", n !== name);
+      $("tab" + n).classList.toggle("active", n === name);
+    });
+    $("authErr").textContent = "";
+  }
+  $("tabLogin").onclick = () => showTab("Login");
+  $("tabRegister").onclick = () => showTab("Register");
+  $("tabGov").onclick = () => showTab("Gov");
+
+  // ---------- LOGIN / REGISTER / GOV ----------
+  $("btnLogin").onclick = async () => {
+    try {
+      await signInWithEmailAndPassword(auth, $("lEmail").value.trim(), $("lPass").value);
+    } catch (e) { $("authErr").textContent = cleanError(e); }
+  };
+
+  $("btnGov").onclick = async () => {
+    try {
+      await signInWithEmailAndPassword(auth, GOV_EMAIL, $("gPass").value);
+    } catch (e) { $("authErr").textContent = cleanError(e); }
+  };
+
+  $("btnRegister").onclick = async () => {
+    const email = $("rEmail").value.trim();
+    const username = $("rUser").value.trim();
+    const pass = $("rPass").value;
+    if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+      $("authErr").textContent = "username: 3-20 letters, numbers or _";
+      return;
+    }
+    busy = true;
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, pass);
+      try {
+        await set(ref(db, "usernames/" + username.toLowerCase()), cred.user.uid);
+      } catch (e) {
+        await deleteUser(cred.user);
+        busy = false;
+        $("authErr").textContent = "that username is already taken";
+        return;
+      }
+      await set(ref(db, "users/" + cred.user.uid), { username, email, createdAt: serverTimestamp() });
+      busy = false;
+      enter(cred.user);
+    } catch (e) {
+      busy = false;
+      $("authErr").textContent = cleanError(e);
+    }
+  };
+
+  $("btnLogout").onclick = async () => { await signOut(auth); location.reload(); };
+  $("btnGovLogout").onclick = async () => { await signOut(auth); location.reload(); };
+
+  auth.onAuthStateChanged((user) => { if (user && !busy) enter(user); });
+
+  async function enter(user) {
+    $("auth").classList.add("hidden");
+    if (user.email === GOV_EMAIL) {
+      me = { uid: user.uid, username: "GOVERNMENT", isGov: true };
+      $("gov").classList.remove("hidden");
+      startGov();
+      return;
+    }
+    const snap = await get(ref(db, "users/" + user.uid));
+    me = { uid: user.uid, username: snap.exists() ? snap.val().username : user.email, isGov: false };
+    $("me").textContent = "@" + me.username;
+    $("app").classList.remove("hidden");
+    startFeed();
+    loadNews();
+  }
+
+  // ---------- NAVIGATION ----------
+  $("navFeed").onclick = () => {
+    $("feedView").classList.remove("hidden"); $("newsView").classList.add("hidden");
+    $("navFeed").classList.add("active"); $("navNews").classList.remove("active");
+  };
+  $("navNews").onclick = () => {
+    $("newsView").classList.remove("hidden"); $("feedView").classList.add("hidden");
+    $("navNews").classList.add("active"); $("navFeed").classList.remove("active");
+  };
+
+  // ---------- IMAGE COMPRESSION ----------
+  function compress(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const scale = Math.min(1, 700 / img.width);
+          const c = document.createElement("canvas");
+          c.width = img.width * scale;
+          c.height = img.height * scale;
+          c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+          resolve(c.toDataURL("image/jpeg", 0.6));
+        };
+        img.onerror = reject;
+        img.src = reader.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // ---------- POSTS ----------
+  $("btnPost").onclick = async () => {
+    const text = $("postText").value.trim();
+    const file = $("postImg").files[0];
+    $("postErr").textContent = "";
+    if (!text && !file) { $("postErr").textContent = "write something or add an image"; return; }
+    try {
+      const post = { uid: me.uid, username: me.username, text, time: serverTimestamp() };
+      if (file) post.image = await compress(file);
+      await push(ref(db, "posts"), post);
+      $("postText").value = "";
+      $("postImg").value = "";
+    } catch (e) { $("postErr").textContent = "could not post: " + cleanError(e); }
+  };
+
+  function startFeed() {
+    onChildAdded(query(ref(db, "posts"), limitToLast(20)), (snap) => {
+      const box = $("posts");
+      box.insertBefore(renderPost(snap.key, snap.val()), box.firstChild);
+    });
+  }
+
+  function renderPost(id, p) {
+    const card = el("div", "box");
+    card.appendChild(el("div", "dim", "@" + p.username + "  " + fmt(p.time)));
+    if (p.text) card.appendChild(el("div", "", p.text));
+    if (p.image) { const im = el("img", "pic"); im.src = p.image; card.appendChild(im); }
+
+    const actions = el("div", "row");
+    actions.style.marginTop = "8px";
+    const likeBtn = el("button", "", "♥ 0");
+    const comBtn = el("button", "", "COMMENTS");
+    actions.append(likeBtn, comBtn);
+    card.appendChild(actions);
+
+    let liked = false;
+    onValue(ref(db, "likes/" + id), (s) => {
+      const v = s.val() || {};
+      liked = !!v[me.uid];
+      likeBtn.textContent = "♥ " + Object.keys(v).length;
+      likeBtn.classList.toggle("active", liked);
+    });
+    likeBtn.onclick = () => {
+      const r = ref(db, "likes/" + id + "/" + me.uid);
+      liked ? remove(r) : set(r, true);
+    };
+
+    const comBox = el("div", "comments hidden");
+    const list = el("div");
+    const form = el("div", "row");
+    const input = el("input"); input.placeholder = "write a comment..."; input.maxLength = 300;
+    const send = el("button", "", "SEND");
+    form.append(input, send);
+    comBox.append(list, form);
+    card.appendChild(comBox);
+
+    let loaded = false;
+    comBtn.onclick = () => {
+      comBox.classList.toggle("hidden");
+      if (!loaded) {
+        loaded = true;
+        onChildAdded(ref(db, "comments/" + id), (s) => {
+          const c = s.val();
+          const line = el("div");
+          line.append(el("b", "", "@" + c.username + "> "), document.createTextNode(c.text));
+          list.appendChild(line);
+        });
+      }
+    };
+    send.onclick = () => {
+      const text = input.value.trim();
+      if (!text) return;
+      push(ref(db, "comments/" + id), { uid: me.uid, username: me.username, text, time: serverTimestamp() });
+      input.value = "";
+    };
+    return card;
+  }
+
+  // ---------- TECH NEWS (dev.to public API, no key needed) ----------
+  async function loadNews() {
+    const box = $("news");
+    try {
+      const res = await fetch("https://dev.to/api/articles?tag=technology&per_page=15");
+      const items = await res.json();
+      box.textContent = "";
+      items.forEach((a) => {
+        const card = el("div", "box");
+        const link = el("a", "", a.title);
+        link.href = a.url; link.target = "_blank"; link.rel = "noopener";
+        card.appendChild(link);
+        card.appendChild(el("div", "dim", a.user.name + "  " + fmt(a.published_at)));
+        if (a.description) card.appendChild(el("div", "", a.description));
+        box.appendChild(card);
+      });
+    } catch (e) { box.textContent = "could not load news, check your internet and refresh."; }
+  }
+
+  // ---------- GOVERNMENT DASHBOARD ----------
+  function startGov() {
+    onValue(ref(db, "users"), (s) => {
+      const users = s.val() || {};
+      const list = Object.values(users);
+      $("gUsers").textContent = list.length;
+      const box = $("gUserList");
+      box.textContent = "";
+      list.forEach((u) => box.appendChild(el("div", "", "@" + u.username + "  |  " + u.email + "  |  joined " + (u.createdAt ? fmt(u.createdAt) : "?"))));
+    });
+    onValue(ref(db, "posts"), (s) => {
+      const posts = s.val() || {};
+      const list = Object.values(posts).sort((a, b) => b.time - a.time);
+      $("gPosts").textContent = list.length;
+      const box = $("gPostList");
+      box.textContent = "";
+      list.forEach((p) => {
+        const d = el("div", "box");
+        d.appendChild(el("div", "dim", "@" + p.username + "  " + fmt(p.time)));
+        if (p.text) d.appendChild(el("div", "", p.text));
+        if (p.image) { const im = el("img", "pic"); im.src = p.image; d.appendChild(im); }
+        box.appendChild(d);
+      });
+    });
+  }
+</script>
+</body>
+</html>
